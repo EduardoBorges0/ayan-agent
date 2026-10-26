@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: testes que dependem de infraestrutura real (DB, Dataverse, Graph API)",
+    "smoke: verificações mínimas para correr logo após deploy",
+]
