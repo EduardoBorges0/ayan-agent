@@ -2,14 +2,16 @@ import argparse
 import asyncio
 import getpass
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from config import user_settings
 from config.connections.openai_connection import OpenAIConnect
+from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
-from service.agent_service import AgentService
+from service.agent.agent_service import AgentService
 from service.chat_service import ChatService
 from service.memory_service import MemoryService
 from utils.logging_config import configure_logging
@@ -39,12 +41,24 @@ def _error_text(result: dict) -> str:
     return text
 
 
-def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run: Runner) -> None:
+def confirm_action(
+    description: str,
+    read_line: Callable[[str], str] = input,
+    write: Callable[[str], None] = print,
+) -> bool:
+    write(f"\n  O agente quer {description}")
+    answer = read_line("  Permitir? [s/N]: ").replace("\ufeff", "").strip().lower()
+    return answer in {"s", "sim"}
+
+
+def run_chat(
+    read_line: Callable[[str], str], write: Callable[[str], None], run: Runner, context: ToolContext
+) -> None:
     history: list[ChatMessage] = []
     write(WELCOME_TEXT)
     while True:
         try:
-            text = read_line("\nTu: ").replace("﻿", "").strip()
+            text = read_line("\nTu: ").replace("\ufeff", "").strip()
         except EOFError:
             return
         if not text:
@@ -68,13 +82,13 @@ def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run:
             write("Mensagem demasiado longa. Divide-a em partes mais pequenas.")
             continue
 
-        result = run(AgentService.reply(history[-MAX_HISTORY_MESSAGES:]))
+        result = run(AgentService.reply(history[-MAX_HISTORY_MESSAGES:], context))
         if not result["success"]:
             history.pop()
             write(_error_text(result))
             continue
 
-        for event in result["data"].memory_events:
+        for event in result["data"].events:
             write(f"  · {event}")
         reply = result["data"].reply
         # O limite de tamanho do ChatMessage protege o input do utilizador, não a resposta do modelo.
@@ -182,7 +196,7 @@ def _start_chat(run: Runner) -> None:
         print("Primeira utilização: configura a tua chave da OpenAI.")
         configure(run)
     OpenAIConnect.configure(user_settings.get_api_key(), user_settings.get_model())
-    run_chat(input, print, run)
+    run_chat(input, print, run, ToolContext(workspace=Path.cwd(), confirm=confirm_action))
 
 
 def main(argv: list[str] | None = None) -> int:

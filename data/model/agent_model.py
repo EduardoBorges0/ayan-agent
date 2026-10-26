@@ -1,4 +1,6 @@
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -36,4 +38,22 @@ class ModelTurn:
 @dataclass(frozen=True)
 class AgentReply:
     reply: str
-    memory_events: list[str] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ToolContext:
+    workspace: Path
+    confirm: Callable[[str], bool]
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    output: str
+    event: str | None = None
+
+
+@dataclass(frozen=True)
+class AgentTool:
+    definition: ToolDefinition
+    run: Callable[[str, ToolContext], Awaitable[ToolOutcome]]
