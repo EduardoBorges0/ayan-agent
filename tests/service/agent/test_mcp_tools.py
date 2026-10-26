@@ -19,13 +19,23 @@ def _context(approve: bool = True) -> tuple[ToolContext, MagicMock]:
     return ToolContext(workspace=Path("."), confirm=confirm), confirm
 
 
-async def _connect_with(mock_gateway, *infos: McpToolInfo):
+USER_TMDB = McpServerConfig(name="tmdb", command="python")
+BUILTIN_TMDB = McpServerConfig(name="tmdb", command="python", args=["-m", "mcp_servers.tmdb_mcp"], trusted=True)
+
+
+async def _connect_and_capture(mock_gateway, *infos: McpToolInfo, user=(USER_TMDB,), builtin=()):
     mock_gateway.list_tools = AsyncMock(return_value=list(infos))
-    with patch("service.agent.mcp_tools.load_server_configs",
-               return_value=([McpServerConfig(name="tmdb", command="python")], [])), \
+    with patch("service.agent.mcp_tools.load_server_configs", return_value=(list(user), [])), \
+         patch("service.agent.mcp_tools.builtin_server_configs", return_value=list(builtin)), \
          patch("service.agent.mcp_tools.McpConnect") as mock_connect:
         mock_connect.start = AsyncMock(return_value={})
-        return (await McpToolsService.connect())["data"]
+        connection = (await McpToolsService.connect())["data"]
+        return connection, mock_connect.start.call_args.args[0]
+
+
+async def _connect_with(mock_gateway, *infos: McpToolInfo, user=(USER_TMDB,), builtin=()):
+    connection, _ = await _connect_and_capture(mock_gateway, *infos, user=user, builtin=builtin)
+    return connection
 
 
 @pytest.mark.asyncio
@@ -52,9 +62,39 @@ async def test_connect_skips_tools_whose_name_the_model_would_reject(mock_gatewa
 
 
 @pytest.mark.asyncio
+@patch("service.agent.mcp_tools.McpGateway")
+async def test_builtin_server_is_started_when_user_has_none_with_that_name(mock_gateway):
+    _, started = await _connect_and_capture(mock_gateway, SEARCH, user=(), builtin=(BUILTIN_TMDB,))
+
+    assert started == [BUILTIN_TMDB]
+
+
+@pytest.mark.asyncio
+@patch("service.agent.mcp_tools.McpGateway")
+async def test_user_configured_server_overrides_builtin_with_same_name(mock_gateway):
+    _, started = await _connect_and_capture(mock_gateway, SEARCH, user=(USER_TMDB,), builtin=(BUILTIN_TMDB,))
+
+    assert started == [USER_TMDB]
+
+
+@pytest.mark.asyncio
+@patch("service.agent.mcp_tools.McpGateway")
+async def test_tools_of_trusted_builtin_servers_never_ask_for_approval(mock_gateway):
+    tool = (await _connect_with(mock_gateway, SEARCH, user=(), builtin=(BUILTIN_TMDB,))).tools[0]
+    mock_gateway.call_tool = AsyncMock(return_value=McpCallResult(text="Matrix (1999)", is_error=False))
+    context, confirm = _context(approve=False)
+
+    outcome = await tool.run('{"query": "matrix"}', context)
+
+    assert outcome.output == "Matrix (1999)"
+    confirm.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_connect_reports_servers_that_failed_to_start():
     with patch("service.agent.mcp_tools.load_server_configs",
                return_value=([McpServerConfig(name="tmdb", command="nao-existe")], [])), \
+         patch("service.agent.mcp_tools.builtin_server_configs", return_value=[]), \
          patch("service.agent.mcp_tools.McpConnect") as mock_connect:
         mock_connect.start = AsyncMock(return_value={"tmdb": "FileNotFoundError: nao-existe"})
         connection = (await McpToolsService.connect())["data"]

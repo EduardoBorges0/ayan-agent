@@ -5,3 +5,4 @@ python-dotenv==1.2.4
 openai==3.39.0
 keyring==25.7.0
 mcp==2.3.0
+httpx==0.28.1

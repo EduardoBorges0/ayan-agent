@@ -13,6 +13,7 @@ from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
 from data.model.mcp_model import McpServerConfig
 from load_env import MCP_CONFIG_PATH
+from mcp_servers.tmdb_mcp.service.credentials_service import CredentialsService as TmdbCredentialsService
 from service.agent.agent_service import AgentService
 from service.agent.computer_tools import initial_approved_folders
 from service.agent.mcp_tools import McpToolsService
@@ -200,6 +201,33 @@ def configure(run: Runner) -> None:
     print(f"Configuração guardada: modelo {model}. A chave fica no Gestor de Credenciais do Windows.")
     if user_settings.api_key_comes_from_env():
         print("Atenção: a variável OPENAI_API_KEY está definida e tem prioridade sobre a chave guardada.")
+    configure_tmdb(run)
+
+
+def configure_tmdb(
+    run: Runner,
+    read_secret: Callable[[str], str] = getpass.getpass,
+    write: Callable[[str], None] = print,
+) -> None:
+    hint = "Enter para manter a atual" if user_settings.get_tmdb_api_key() else "Enter para saltar"
+    write(
+        "\nTMDB (opcional): permite ao agente pesquisar filmes e séries. "
+        "A chave está em https://www.themoviedb.org/settings/api"
+    )
+    while True:
+        api_key = read_secret(f"Chave API do TMDB ({hint}): ").strip()
+        if not api_key:
+            return
+        result = run(TmdbCredentialsService.validate_key(api_key))
+        if result["success"]:
+            user_settings.save_tmdb_api_key(result["data"])
+            write("Chave do TMDB validada e guardada no Gestor de Credenciais do Windows.")
+            return
+        if result["error"] != "invalid_key":
+            write(f"Não foi possível contactar o TMDB para validar a chave ({result.get('detail')}). "
+                  "Tenta mais tarde com 'ayan config'.")
+            return
+        write("O TMDB rejeitou esta chave. Confirma-a e tenta novamente.")
 
 
 def logout() -> None:

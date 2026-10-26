@@ -41,6 +41,7 @@ async def test_agent_tools_talk_to_a_real_stdio_mcp_server(tmp_path, monkeypatch
         McpServerConfig(name="partido", command="comando-que-nao-existe-ayan"),
     ]
     monkeypatch.setattr("service.agent.mcp_tools.load_server_configs", lambda: (servers, []))
+    monkeypatch.setattr("service.agent.mcp_tools.builtin_server_configs", lambda: [])
     monkeypatch.setattr("config.connections.mcp_connection.USER_CONFIG_DIR", tmp_path)
 
     connection = (await McpToolsService.connect())["data"]

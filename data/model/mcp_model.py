@@ -11,6 +11,7 @@ class McpServerConfig(BaseModel):
     args: list[str] = []
     env: dict[str, str] = {}
     cwd: str | None = None
+    trusted: bool = False
 
 
 @dataclass(frozen=True)

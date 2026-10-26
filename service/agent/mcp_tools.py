@@ -1,6 +1,7 @@
 import json
 import re
 
+from config.builtin_mcp_servers import builtin_server_configs
 from config.connections.mcp_connection import McpConnect
 from config.mcp_settings import load_server_configs
 from data.gateway.mcp_gateway import McpGateway, McpUnavailableError
@@ -28,7 +29,7 @@ def _preview(arguments: dict) -> str:
     return text if len(text) <= MAX_ARGUMENTS_PREVIEW_CHARS else text[:MAX_ARGUMENTS_PREVIEW_CHARS] + "…"
 
 
-def _to_agent_tool(info: McpToolInfo) -> AgentTool | None:
+def _to_agent_tool(info: McpToolInfo, trusted: bool) -> AgentTool | None:
     name = qualified_tool_name(info.server, info.name)
     if not _VALID_TOOL_NAME.match(name):
         return None
@@ -42,7 +43,7 @@ def _to_agent_tool(info: McpToolInfo) -> AgentTool | None:
         if not isinstance(parsed, dict):
             return ToolOutcome("Erro: argumentos inválidos.")
 
-        if name not in context.approved_tools:
+        if not trusted and name not in context.approved_tools:
             if not context.confirm(
                 f"usar a ferramenta '{info.name}' do servidor MCP '{info.server}' durante esta sessão\n"
                 f"    Argumentos deste pedido: {_preview(parsed)}"
@@ -74,7 +75,10 @@ def _to_agent_tool(info: McpToolInfo) -> AgentTool | None:
 class McpToolsService:
     @staticmethod
     async def connect() -> dict:
-        configs, warnings = load_server_configs()
+        user_configs, warnings = load_server_configs()
+        user_names = {config.name for config in user_configs}
+        builtin_configs = [config for config in builtin_server_configs() if config.name not in user_names]
+        configs = [*builtin_configs, *user_configs]
         if not configs:
             return {"success": True, "data": McpConnection(warnings=warnings)}
 
@@ -93,7 +97,7 @@ class McpToolsService:
                 continue
             servers[config.name] = 0
             for info in infos:
-                tool = _to_agent_tool(info)
+                tool = _to_agent_tool(info, config.trusted)
                 if tool is None:
                     warnings.append(f"Ignorei a ferramenta '{info.name}' de '{config.name}': o nome não é aceite pelo modelo.")
                     continue

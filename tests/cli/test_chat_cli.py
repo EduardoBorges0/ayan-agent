@@ -1,8 +1,8 @@
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from cli.chat_cli import _build_parser, confirm_action, run_chat
+from cli.chat_cli import _build_parser, configure_tmdb, confirm_action, run_chat
 from data.model.agent_model import AgentReply, AgentTool, ToolContext, ToolDefinition
 from data.model.memory_model import Memory
 
@@ -173,6 +173,49 @@ def test_mcp_add_command_keeps_server_arguments_after_the_command():
 
     assert (args.name, args.cwd, args.server_command) == ("tmdb", "C:/tmdb-mcp", "C:/tmdb-mcp/.venv/Scripts/python.exe")
     assert args.server_args == ["-m", "tmdb_mcp"]
+
+
+@patch("cli.chat_cli.TmdbCredentialsService")
+@patch("cli.chat_cli.user_settings")
+def test_tmdb_step_is_skipped_with_enter(mock_settings, mock_credentials):
+    mock_settings.get_tmdb_api_key.return_value = None
+    mock_credentials.validate_key = AsyncMock()
+
+    configure_tmdb(asyncio.run, read_secret=lambda _: "", write=lambda _: None)
+
+    mock_credentials.validate_key.assert_not_called()
+    mock_settings.save_tmdb_api_key.assert_not_called()
+
+
+@patch("cli.chat_cli.TmdbCredentialsService")
+@patch("cli.chat_cli.user_settings")
+def test_tmdb_key_is_saved_only_after_tmdb_accepts_it(mock_settings, mock_credentials):
+    mock_settings.get_tmdb_api_key.return_value = None
+    mock_credentials.validate_key = AsyncMock(side_effect=[
+        {"success": False, "error": "invalid_key"},
+        {"success": True, "data": "chave-boa"},
+    ])
+    output: list[str] = []
+
+    configure_tmdb(asyncio.run, read_secret=_scripted_input("chave-errada", "chave-boa"), write=output.append)
+
+    mock_settings.save_tmdb_api_key.assert_called_once_with("chave-boa")
+    assert any("rejeitou" in line for line in output)
+
+
+@patch("cli.chat_cli.TmdbCredentialsService")
+@patch("cli.chat_cli.user_settings")
+def test_tmdb_step_gives_up_when_tmdb_cannot_be_reached(mock_settings, mock_credentials):
+    mock_settings.get_tmdb_api_key.return_value = None
+    mock_credentials.validate_key = AsyncMock(
+        return_value={"success": False, "error": "tmdb_unavailable", "detail": "ConnectError"}
+    )
+    read_secret = MagicMock(return_value="uma-chave")
+
+    configure_tmdb(asyncio.run, read_secret=read_secret, write=lambda _: None)
+
+    read_secret.assert_called_once()
+    mock_settings.save_tmdb_api_key.assert_not_called()
 
 
 @patch("cli.chat_cli.AgentService")
