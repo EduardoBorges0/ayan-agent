@@ -2,7 +2,8 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from cli.chat_cli import run_chat
-from data.model.chat_model import ChatResponse
+from data.model.agent_model import AgentReply
+from data.model.memory_model import Memory
 
 
 def _scripted_input(*lines: str):
@@ -17,10 +18,10 @@ def _scripted_input(*lines: str):
 
 
 def _ok(reply: str) -> dict:
-    return {"success": True, "data": ChatResponse(reply=reply)}
+    return {"success": True, "data": AgentReply(reply=reply)}
 
 
-@patch("cli.chat_cli.ChatService")
+@patch("cli.chat_cli.AgentService")
 def test_second_message_is_sent_with_previous_turns_as_history(mock_service):
     mock_service.reply = AsyncMock(side_effect=[_ok("Olá!"), _ok("Das 9h às 18h.")])
     output: list[str] = []
@@ -36,7 +37,7 @@ def test_second_message_is_sent_with_previous_turns_as_history(mock_service):
     assert "\nAyan: Das 9h às 18h." in output
 
 
-@patch("cli.chat_cli.ChatService")
+@patch("cli.chat_cli.AgentService")
 def test_rejected_api_key_shows_config_hint_and_drops_failed_message(mock_service):
     mock_service.reply = AsyncMock(
         side_effect=[{"success": False, "error": "llm_auth_failed"}, _ok("Olá!")]
@@ -50,7 +51,7 @@ def test_rejected_api_key_shows_config_hint_and_drops_failed_message(mock_servic
     assert [m.content for m in sent] == ["Segunda"]
 
 
-@patch("cli.chat_cli.ChatService")
+@patch("cli.chat_cli.AgentService")
 def test_openai_failure_shows_reason_given_by_openai(mock_service):
     mock_service.reply = AsyncMock(return_value={
         "success": False, "error": "llm_unavailable", "detail": "HTTP 429: You exceeded your current quota.",
@@ -62,7 +63,7 @@ def test_openai_failure_shows_reason_given_by_openai(mock_service):
     assert any("HTTP 429: You exceeded your current quota." in line for line in output)
 
 
-@patch("cli.chat_cli.ChatService")
+@patch("cli.chat_cli.AgentService")
 def test_clear_command_starts_a_new_conversation(mock_service):
     mock_service.reply = AsyncMock(side_effect=[_ok("Olá!"), _ok("Nova conversa.")])
 
@@ -72,7 +73,63 @@ def test_clear_command_starts_a_new_conversation(mock_service):
     assert [m.content for m in sent] == ["Outra coisa"]
 
 
-@patch("cli.chat_cli.ChatService")
+@patch("cli.chat_cli.AgentService")
+def test_memory_events_are_shown_before_reply(mock_service):
+    mock_service.reply = AsyncMock(return_value={
+        "success": True,
+        "data": AgentReply(reply="Combinado.", memory_events=["Guardei na memória: Prefere tópicos."]),
+    })
+    output: list[str] = []
+
+    run_chat(_scripted_input("Responde sempre em tópicos"), output.append, asyncio.run)
+
+    event_index = output.index("  · Guardei na memória: Prefere tópicos.")
+    assert output.index("\nAyan: Combinado.") > event_index
+
+
+@patch("cli.chat_cli.MemoryService")
+@patch("cli.chat_cli.AgentService")
+def test_memory_command_lists_memories_without_calling_the_model(mock_agent, mock_memory):
+    mock_agent.reply = AsyncMock()
+    mock_memory.list_memories = AsyncMock(return_value={
+        "success": True, "data": [Memory(id=4, content="Trabalha na Almovi.", created_at="2026-10-26")],
+    })
+    output: list[str] = []
+
+    run_chat(_scripted_input("/memoria"), output.append, asyncio.run)
+
+    assert "    4) Trabalha na Almovi." in output
+    mock_agent.reply.assert_not_called()
+
+
+@patch("cli.chat_cli.MemoryService")
+@patch("cli.chat_cli.AgentService")
+def test_forget_command_deletes_memory_by_number(mock_agent, mock_memory):
+    mock_memory.forget = AsyncMock(return_value={
+        "success": True, "data": Memory(id=4, content="Trabalha na Almovi.", created_at="2026-10-26"),
+    })
+    output: list[str] = []
+
+    run_chat(_scripted_input("/esquecer 4", "/esquecer abc"), output.append, asyncio.run)
+
+    mock_memory.forget.assert_awaited_once_with(4)
+    assert "Esqueci: Trabalha na Almovi." in output
+    assert any(line.startswith("Usa: /esquecer N") for line in output)
+
+
+@patch("cli.chat_cli.MemoryService")
+@patch("cli.chat_cli.AgentService")
+def test_command_is_recognized_even_with_byte_order_mark_from_piped_input(mock_agent, mock_memory):
+    mock_agent.reply = AsyncMock()
+    mock_memory.list_memories = AsyncMock(return_value={"success": True, "data": []})
+
+    run_chat(_scripted_input("﻿/memoria"), lambda _: None, asyncio.run)
+
+    mock_agent.reply.assert_not_called()
+    mock_memory.list_memories.assert_awaited_once()
+
+
+@patch("cli.chat_cli.AgentService")
 def test_too_long_message_is_not_sent(mock_service):
     mock_service.reply = AsyncMock()
     output: list[str] = []

@@ -27,16 +27,16 @@ class ChatService:
             return {"success": False, "error": "last_message_not_from_user"}
 
         try:
-            text = await OpenAIGateway.generate_reply(messages, SYSTEM_INSTRUCTIONS)
+            turn = await OpenAIGateway.generate_turn(messages, SYSTEM_INSTRUCTIONS)
         except LLMAuthenticationError:
             return {"success": False, "error": "llm_auth_failed"}
         except LLMUnavailableError as exc:
             return {"success": False, "error": "llm_unavailable", "detail": exc.reason}
 
-        if not text.strip():
+        if not turn.text.strip():
             return {"success": False, "error": "empty_reply"}
 
-        return {"success": True, "data": ChatResponse(reply=text)}
+        return {"success": True, "data": ChatResponse(reply=turn.text)}
 
     @staticmethod
     async def available_models() -> dict:

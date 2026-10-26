@@ -16,3 +16,4 @@ OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1024"))
 
 USER_CONFIG_DIR = Path(os.getenv("APPDATA") or Path.home() / ".config") / "ayan"
+AYAN_DB_PATH = USER_CONFIG_DIR / "ayan.db"

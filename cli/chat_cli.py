@@ -9,12 +9,19 @@ from pydantic import ValidationError
 from config import user_settings
 from config.connections.openai_connection import OpenAIConnect
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
+from service.agent_service import AgentService
 from service.chat_service import ChatService
+from service.memory_service import MemoryService
 from utils.logging_config import configure_logging
 
 EXIT_COMMANDS = {"/sair", "/exit"}
 CLEAR_COMMAND = "/limpar"
-WELCOME_TEXT = "Escreve a tua mensagem. Comandos: /limpar (nova conversa), /sair (terminar)."
+MEMORY_COMMAND = "/memoria"
+FORGET_COMMAND = "/esquecer"
+WELCOME_TEXT = (
+    "Escreve a tua mensagem. Comandos: /memoria (ver o que sei sobre ti), /esquecer N (apagar a memória N), "
+    "/limpar (nova conversa), /sair (terminar)."
+)
 
 _ERROR_MESSAGES = {
     "llm_auth_failed": "A OpenAI rejeitou a chave API. Corre 'ayan config' para a alterar.",
@@ -37,7 +44,7 @@ def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run:
     write(WELCOME_TEXT)
     while True:
         try:
-            text = read_line("\nTu: ").strip()
+            text = read_line("\nTu: ").replace("﻿", "").strip()
         except EOFError:
             return
         if not text:
@@ -48,6 +55,12 @@ def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run:
             history.clear()
             write("Conversa limpa.")
             continue
+        if text.lower() == MEMORY_COMMAND:
+            _show_memories(write, run)
+            continue
+        if text.lower().split()[0] == FORGET_COMMAND:
+            _forget_memory(text, write, run)
+            continue
 
         try:
             history.append(ChatMessage(role="user", content=text))
@@ -55,16 +68,40 @@ def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run:
             write("Mensagem demasiado longa. Divide-a em partes mais pequenas.")
             continue
 
-        result = run(ChatService.reply(history[-MAX_HISTORY_MESSAGES:]))
+        result = run(AgentService.reply(history[-MAX_HISTORY_MESSAGES:]))
         if not result["success"]:
             history.pop()
             write(_error_text(result))
             continue
 
+        for event in result["data"].memory_events:
+            write(f"  · {event}")
         reply = result["data"].reply
         # O limite de tamanho do ChatMessage protege o input do utilizador, não a resposta do modelo.
         history.append(ChatMessage.model_construct(role="assistant", content=reply))
         write(f"\nAyan: {reply}")
+
+
+def _show_memories(write: Callable[[str], None], run: Runner) -> None:
+    memories = run(MemoryService.list_memories())["data"]
+    if not memories:
+        write("Ainda não guardei nada sobre ti.")
+        return
+    write("O que sei sobre ti:")
+    for memory in memories:
+        write(f"  {memory.id:>3}) {memory.content}")
+
+
+def _forget_memory(text: str, write: Callable[[str], None], run: Runner) -> None:
+    parts = text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        write("Usa: /esquecer N (o número aparece em /memoria).")
+        return
+    result = run(MemoryService.forget(int(parts[1])))
+    if result["success"]:
+        write(f"Esqueci: {result['data'].content}")
+    else:
+        write("Não existe nenhuma memória com esse número.")
 
 
 def _prompt_api_key(has_current: bool) -> str | None:

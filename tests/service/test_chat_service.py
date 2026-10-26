@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from data.gateway.openai_gateway import LLMAuthenticationError, LLMUnavailableError
+from data.model.agent_model import ModelTurn
 from data.model.chat_model import ChatMessage
 from service.chat_service import ChatService
 
@@ -12,7 +13,7 @@ USER_MESSAGES = [ChatMessage(role="user", content="Olá")]
 @pytest.mark.asyncio
 @patch("service.chat_service.OpenAIGateway")
 async def test_reply_returns_model_text_on_success(mock_gateway):
-    mock_gateway.generate_reply = AsyncMock(return_value="Olá! Em que posso ajudar?")
+    mock_gateway.generate_turn = AsyncMock(return_value=ModelTurn(text="Olá! Em que posso ajudar?"))
 
     result = await ChatService.reply(USER_MESSAGES)
 
@@ -23,19 +24,19 @@ async def test_reply_returns_model_text_on_success(mock_gateway):
 @pytest.mark.asyncio
 @patch("service.chat_service.OpenAIGateway")
 async def test_reply_rejects_conversation_not_ending_with_user_message(mock_gateway):
-    mock_gateway.generate_reply = AsyncMock()
+    mock_gateway.generate_turn = AsyncMock()
     messages = USER_MESSAGES + [ChatMessage(role="assistant", content="Olá!")]
 
     result = await ChatService.reply(messages)
 
     assert result == {"success": False, "error": "last_message_not_from_user"}
-    mock_gateway.generate_reply.assert_not_called()
+    mock_gateway.generate_turn.assert_not_called()
 
 
 @pytest.mark.asyncio
 @patch("service.chat_service.OpenAIGateway")
 async def test_reply_returns_llm_unavailable_when_gateway_fails(mock_gateway):
-    mock_gateway.generate_reply = AsyncMock(side_effect=LLMUnavailableError("HTTP 429: sem quota"))
+    mock_gateway.generate_turn = AsyncMock(side_effect=LLMUnavailableError("HTTP 429: sem quota"))
 
     result = await ChatService.reply(USER_MESSAGES)
 
@@ -45,7 +46,7 @@ async def test_reply_returns_llm_unavailable_when_gateway_fails(mock_gateway):
 @pytest.mark.asyncio
 @patch("service.chat_service.OpenAIGateway")
 async def test_reply_returns_llm_auth_failed_when_key_is_rejected(mock_gateway):
-    mock_gateway.generate_reply = AsyncMock(side_effect=LLMAuthenticationError())
+    mock_gateway.generate_turn = AsyncMock(side_effect=LLMAuthenticationError())
 
     result = await ChatService.reply(USER_MESSAGES)
 
@@ -80,7 +81,7 @@ async def test_available_models_returns_llm_auth_failed_when_key_is_rejected(moc
 @pytest.mark.asyncio
 @patch("service.chat_service.OpenAIGateway")
 async def test_reply_returns_empty_reply_when_model_returns_blank_text(mock_gateway):
-    mock_gateway.generate_reply = AsyncMock(return_value="   ")
+    mock_gateway.generate_turn = AsyncMock(return_value=ModelTurn(text="   "))
 
     result = await ChatService.reply(USER_MESSAGES)
 
