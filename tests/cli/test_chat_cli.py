@@ -51,6 +51,18 @@ def test_rejected_api_key_shows_config_hint_and_drops_failed_message(mock_servic
 
 
 @patch("cli.chat_cli.ChatService")
+def test_openai_failure_shows_reason_given_by_openai(mock_service):
+    mock_service.reply = AsyncMock(return_value={
+        "success": False, "error": "llm_unavailable", "detail": "HTTP 429: You exceeded your current quota.",
+    })
+    output: list[str] = []
+
+    run_chat(_scripted_input("Olá"), output.append, asyncio.run)
+
+    assert any("HTTP 429: You exceeded your current quota." in line for line in output)
+
+
+@patch("cli.chat_cli.ChatService")
 def test_clear_command_starts_a_new_conversation(mock_service):
     mock_service.reply = AsyncMock(side_effect=[_ok("Olá!"), _ok("Nova conversa.")])
 

@@ -9,7 +9,7 @@ class OpenAIConnect:
     _model: str | None = OPENAI_MODEL
 
     @classmethod
-    def configure(cls, api_key: str, model: str) -> None:
+    def configure(cls, api_key: str, model: str | None = None) -> None:
         cls._api_key = api_key
         cls._model = model
         cls._client = None
@@ -17,8 +17,8 @@ class OpenAIConnect:
     @classmethod
     def get_client(cls) -> AsyncOpenAI:
         if cls._client is None:
-            if not cls._api_key or not cls._model:
-                raise RuntimeError("A chave e o modelo da OpenAI têm de estar configurados.")
+            if not cls._api_key:
+                raise RuntimeError("A chave da OpenAI tem de estar configurada.")
             cls._client = AsyncOpenAI(
                 api_key=cls._api_key,
                 timeout=OPENAI_TIMEOUT_SECONDS,
@@ -28,4 +28,6 @@ class OpenAIConnect:
 
     @classmethod
     def get_model(cls) -> str:
+        if not cls._model:
+            raise RuntimeError("O modelo da OpenAI tem de estar configurado.")
         return cls._model

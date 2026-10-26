@@ -55,8 +55,11 @@ def test_chat_maps_last_message_not_from_user_to_422(mock_service):
 
 @patch("controller.chat_controller.ChatService")
 def test_chat_maps_llm_unavailable_to_502(mock_service):
-    mock_service.reply = AsyncMock(return_value={"success": False, "error": "llm_unavailable"})
+    mock_service.reply = AsyncMock(
+        return_value={"success": False, "error": "llm_unavailable", "detail": "HTTP 429: quota da conta X"}
+    )
 
     response = client.post(URL, json=VALID_BODY)
 
     assert response.status_code == 502
+    assert "quota" not in response.text

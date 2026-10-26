@@ -18,14 +18,18 @@ WELCOME_TEXT = "Escreve a tua mensagem. Comandos: /limpar (nova conversa), /sair
 
 _ERROR_MESSAGES = {
     "llm_auth_failed": "A OpenAI rejeitou a chave API. Corre 'ayan config' para a alterar.",
-    "llm_unavailable": (
-        "Não foi possível obter resposta da OpenAI. "
-        "Verifica a ligação à internet e o modelo configurado ('ayan config')."
-    ),
+    "llm_unavailable": "Não foi possível obter resposta da OpenAI.",
     "empty_reply": "A OpenAI não devolveu resposta. Tenta reformular a mensagem.",
 }
 
 Runner = Callable[[Coroutine[Any, Any, dict]], dict]
+
+
+def _error_text(result: dict) -> str:
+    text = _ERROR_MESSAGES[result["error"]]
+    if result.get("detail"):
+        text += f"\nMotivo indicado pela OpenAI: {result['detail']}"
+    return text
 
 
 def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run: Runner) -> None:
@@ -54,7 +58,7 @@ def run_chat(read_line: Callable[[str], str], write: Callable[[str], None], run:
         result = run(ChatService.reply(history[-MAX_HISTORY_MESSAGES:]))
         if not result["success"]:
             history.pop()
-            write(_ERROR_MESSAGES[result["error"]])
+            write(_error_text(result))
             continue
 
         reply = result["data"].reply
@@ -72,21 +76,59 @@ def _prompt_api_key(has_current: bool) -> str | None:
         print("A chave não pode estar vazia.")
 
 
-def _prompt_model(current: str | None) -> str:
+def _prompt_model_name(current: str | None) -> str:
     hint = f" [{current}]" if current else ""
     while True:
-        model = input(f"Modelo da OpenAI a usar{hint}: ").strip() or current
+        model = input(f"Nome do modelo da OpenAI a usar{hint}: ").strip() or current
         if model:
             return model
         print("Indica o nome de um modelo disponível na tua conta OpenAI.")
 
 
-def configure() -> None:
-    api_key = _prompt_api_key(has_current=user_settings.get_api_key() is not None)
-    if api_key:
-        user_settings.save_api_key(api_key)
-    user_settings.save_model(_prompt_model(user_settings.get_model()))
-    print("Configuração guardada. A chave fica no Gestor de Credenciais do Windows.")
+def choose_model(
+    models: list[str],
+    current: str | None,
+    read_line: Callable[[str], str] = input,
+    write: Callable[[str], None] = print,
+) -> str:
+    write("\nModelos disponíveis na tua conta:")
+    for number, model in enumerate(models, start=1):
+        marker = "  (atual)" if model == current else ""
+        write(f"  {number:>2}) {model}{marker}")
+
+    default = current if current in models else None
+    hint = f" [Enter = {default}]" if default else ""
+    while True:
+        answer = read_line(f"Escolhe o número do modelo{hint}: ").strip()
+        if not answer and default:
+            return default
+        if answer.isdigit() and 1 <= int(answer) <= len(models):
+            return models[int(answer) - 1]
+        write(f"Escreve um número entre 1 e {len(models)}.")
+
+
+def configure(run: Runner) -> None:
+    current_key = user_settings.get_api_key()
+    while True:
+        new_key = _prompt_api_key(has_current=current_key is not None)
+        OpenAIConnect.configure(new_key or current_key)
+        result = run(ChatService.available_models())
+        if result["success"] or result["error"] != "llm_auth_failed":
+            break
+        print("A OpenAI rejeitou esta chave. Confirma-a e tenta novamente.")
+        current_key = None
+
+    if new_key:
+        user_settings.save_api_key(new_key)
+
+    current_model = user_settings.get_model()
+    if result["success"] and result["data"]:
+        model = choose_model(result["data"], current_model)
+    else:
+        print(_error_text(result) if not result["success"] else "A conta não tem modelos de chat disponíveis.")
+        model = _prompt_model_name(current_model)
+    user_settings.save_model(model)
+    print(f"Configuração guardada: modelo {model}. A chave fica no Gestor de Credenciais do Windows.")
     if user_settings.api_key_comes_from_env():
         print("Atenção: a variável OPENAI_API_KEY está definida e tem prioridade sobre a chave guardada.")
 
@@ -98,13 +140,12 @@ def logout() -> None:
         print("Não havia nenhuma chave API guardada.")
 
 
-def _start_chat() -> None:
+def _start_chat(run: Runner) -> None:
     if not user_settings.get_api_key() or not user_settings.get_model():
         print("Primeira utilização: configura a tua chave da OpenAI.")
-        configure()
+        configure(run)
     OpenAIConnect.configure(user_settings.get_api_key(), user_settings.get_model())
-    with asyncio.Runner() as runner:
-        run_chat(input, print, runner.run)
+    run_chat(input, print, run)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -120,12 +161,14 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_logging("ERROR")
     try:
-        if args.command == "config":
-            configure()
-        elif args.command == "logout":
+        if args.command == "logout":
             logout()
-        else:
-            _start_chat()
-    except KeyboardInterrupt:
+            return 0
+        with asyncio.Runner() as runner:
+            if args.command == "config":
+                configure(runner.run)
+            else:
+                _start_chat(runner.run)
+    except (KeyboardInterrupt, EOFError):
         print()
     return 0
