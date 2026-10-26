@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from data.gateway.openai_gateway import LLMUnavailableError
-from data.model.agent_model import ModelTurn, ToolCall, ToolContext
+from data.model.agent_model import AgentTool, ModelTurn, ToolCall, ToolContext, ToolDefinition, ToolOutcome
 from data.model.chat_model import ChatMessage
 from data.model.memory_model import Memory
 from service.agent.agent_service import MAX_TOOL_ROUNDS, AgentService
@@ -68,6 +68,29 @@ async def test_tool_result_is_sent_back_and_event_is_reported(mock_gateway, mock
     assert result["data"].events == [f"Listei {CONTEXT.workspace.resolve()}"]
     tool_rounds = mock_gateway.generate_turn.call_args_list[1].args[3]
     assert tool_rounds[0].results[0].output.endswith("(pasta vazia)")
+
+
+@pytest.mark.asyncio
+@patch("service.agent.agent_service.MemoryService")
+@patch("service.agent.agent_service.OpenAIGateway")
+async def test_session_tools_are_offered_and_dispatched(mock_gateway, mock_memory):
+    mock_memory.list_memories = _no_memories()
+    session_tool = AgentTool(
+        ToolDefinition(name="tmdb__search_movies", description="Pesquisa.", parameters={"type": "object"}),
+        AsyncMock(return_value=ToolOutcome("Matrix (1999)", "Usei tmdb.search_movies")),
+    )
+    context = ToolContext(workspace=CONTEXT.workspace, confirm=lambda _: True, session_tools=(session_tool,))
+    mock_gateway.generate_turn = AsyncMock(side_effect=[
+        ModelTurn(text="", tool_calls=[ToolCall("c1", "tmdb__search_movies", '{"query": "matrix"}')]),
+        ModelTurn(text="Encontrei o Matrix."),
+    ])
+
+    result = await AgentService.reply(USER_MESSAGES, context)
+
+    offered = {tool.name for tool in mock_gateway.generate_turn.call_args_list[0].args[2]}
+    assert "tmdb__search_movies" in offered
+    session_tool.run.assert_awaited_once_with('{"query": "matrix"}', context)
+    assert result["data"].events == ["Usei tmdb.search_movies"]
 
 
 @pytest.mark.asyncio

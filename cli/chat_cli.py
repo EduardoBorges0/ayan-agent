@@ -7,12 +7,15 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from config import user_settings
+from config import mcp_settings, user_settings
 from config.connections.openai_connection import OpenAIConnect
 from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
+from data.model.mcp_model import McpServerConfig
+from load_env import MCP_CONFIG_PATH
 from service.agent.agent_service import AgentService
 from service.agent.computer_tools import initial_approved_folders
+from service.agent.mcp_tools import McpToolsService
 from service.chat_service import ChatService
 from service.memory_service import MemoryService
 from utils.logging_config import configure_logging
@@ -21,9 +24,10 @@ EXIT_COMMANDS = {"/sair", "/exit"}
 CLEAR_COMMAND = "/limpar"
 MEMORY_COMMAND = "/memoria"
 FORGET_COMMAND = "/esquecer"
+MCP_COMMAND = "/mcp"
 WELCOME_TEXT = (
     "Escreve a tua mensagem. Comandos: /memoria (ver o que sei sobre ti), /esquecer N (apagar a memória N), "
-    "/limpar (nova conversa), /sair (terminar)."
+    "/mcp (ferramentas MCP ligadas), /limpar (nova conversa), /sair (terminar)."
 )
 
 _ERROR_MESSAGES = {
@@ -76,6 +80,9 @@ def run_chat(
         if text.lower().split()[0] == FORGET_COMMAND:
             _forget_memory(text, write, run)
             continue
+        if text.lower() == MCP_COMMAND:
+            _show_mcp_tools(write, context)
+            continue
 
         try:
             history.append(ChatMessage(role="user", content=text))
@@ -117,6 +124,16 @@ def _forget_memory(text: str, write: Callable[[str], None], run: Runner) -> None
         write(f"Esqueci: {result['data'].content}")
     else:
         write("Não existe nenhuma memória com esse número.")
+
+
+def _show_mcp_tools(write: Callable[[str], None], context: ToolContext) -> None:
+    if not context.session_tools:
+        write(f"Não há ferramentas MCP ligadas. Adiciona servidores com 'ayan mcp add' ({MCP_CONFIG_PATH}).")
+        return
+    write("Ferramentas MCP ligadas:")
+    for tool in context.session_tools:
+        status = "aprovada nesta sessão" if tool.definition.name in context.approved_tools else "pede aprovação"
+        write(f"  {tool.definition.name} ({status})")
 
 
 def _prompt_api_key(has_current: bool) -> str | None:
@@ -204,10 +221,54 @@ def _start_chat(run: Runner) -> None:
             f"Aviso: {workspace} é uma pasta demasiado ampla. Vou pedir-te autorização antes de ler "
             "qualquer pasta. Para trabalhar sem tantas perguntas, abre o ayan na pasta do teu projeto."
         )
-    run_chat(input, print, run, ToolContext(workspace, confirm_action, approved_folders))
+
+    connection = run(McpToolsService.connect())["data"]
+    for warning in connection.warnings:
+        print(f"Aviso: {warning}")
+    if connection.servers:
+        listed = ", ".join(f"{name} ({count} ferramentas)" for name, count in connection.servers.items())
+        print(f"Servidores MCP ligados: {listed}")
+
+    context = ToolContext(workspace, confirm_action, approved_folders, session_tools=tuple(connection.tools))
+    try:
+        run_chat(input, print, run, context)
+    finally:
+        run(McpToolsService.disconnect())
 
 
-def main(argv: list[str] | None = None) -> int:
+def _manage_mcp(args: argparse.Namespace) -> int:
+    try:
+        if args.mcp_command == "list":
+            servers, warnings = mcp_settings.load_server_configs()
+            for warning in warnings:
+                print(f"Aviso: {warning}")
+            if not servers:
+                print(f"Não há servidores MCP configurados ({MCP_CONFIG_PATH}).")
+            for server in servers:
+                cwd = f"  (pasta: {server.cwd})" if server.cwd else ""
+                print(f"  {server.name}: {server.command} {' '.join(server.args)}{cwd}")
+        elif args.mcp_command == "add":
+            try:
+                server = McpServerConfig(
+                    name=args.name, command=args.server_command, args=args.server_args, cwd=args.cwd
+                )
+            except ValidationError:
+                print("Nome inválido: usa só letras, números, '-' e '_' (máximo 30 caracteres).")
+                return 1
+            mcp_settings.add_server(server)
+            print(f"Servidor MCP '{server.name}' guardado em {MCP_CONFIG_PATH}. Fica disponível no próximo 'ayan'.")
+        elif args.mcp_command == "remove":
+            if mcp_settings.remove_server(args.name):
+                print(f"Servidor MCP '{args.name}' removido.")
+            else:
+                print(f"Não existe nenhum servidor MCP chamado '{args.name}'.")
+    except mcp_settings.McpConfigError as exc:
+        print(f"Erro: {exc}")
+        return 1
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ayan",
         description="Chat com a OpenAI no terminal, usando a tua própria chave API.",
@@ -216,13 +277,34 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("chat", help="iniciar uma conversa (comando por defeito)")
     commands.add_parser("config", help="definir a chave API e o modelo")
     commands.add_parser("logout", help="apagar a chave API guardada neste computador")
-    args = parser.parse_args(argv)
+
+    mcp = commands.add_parser("mcp", help="gerir os servidores MCP que o agente pode usar")
+    mcp_commands = mcp.add_subparsers(dest="mcp_command", required=True)
+    mcp_commands.add_parser("list", help="listar os servidores MCP configurados")
+    add = mcp_commands.add_parser(
+        "add",
+        help="adicionar um servidor MCP (stdio)",
+        description="Exemplo: ayan mcp add tmdb --cwd C:\\caminho\\tmdb-mcp C:\\caminho\\tmdb-mcp\\.venv\\Scripts\\python.exe -m tmdb_mcp",
+    )
+    add.add_argument("name", help="nome curto do servidor (letras, números, '-' e '_')")
+    add.add_argument("--cwd", help="pasta onde o servidor corre")
+    add.add_argument("server_command", help="comando que arranca o servidor")
+    add.add_argument("server_args", nargs=argparse.REMAINDER, help="argumentos do comando")
+    remove = mcp_commands.add_parser("remove", help="remover um servidor MCP")
+    remove.add_argument("name")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
 
     configure_logging("ERROR")
     try:
         if args.command == "logout":
             logout()
             return 0
+        if args.command == "mcp":
+            return _manage_mcp(args)
         with asyncio.Runner() as runner:
             if args.command == "config":
                 configure(runner.run)

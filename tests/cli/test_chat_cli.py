@@ -2,8 +2,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from cli.chat_cli import confirm_action, run_chat
-from data.model.agent_model import AgentReply, ToolContext
+from cli.chat_cli import _build_parser, confirm_action, run_chat
+from data.model.agent_model import AgentReply, AgentTool, ToolContext, ToolDefinition
 from data.model.memory_model import Memory
 
 CONTEXT = ToolContext(workspace=Path("."), confirm=lambda _: False)
@@ -149,6 +149,30 @@ def test_command_is_recognized_even_with_byte_order_mark_from_piped_input(mock_a
 
     mock_agent.reply.assert_not_called()
     mock_memory.list_memories.assert_awaited_once()
+
+
+def test_mcp_command_lists_session_tools_and_their_approval(monkeypatch):
+    tools = tuple(
+        AgentTool(ToolDefinition(name=name, description="", parameters={}), AsyncMock())
+        for name in ("tmdb__search_movies", "tmdb__get_trending")
+    )
+    context = ToolContext(workspace=Path("."), confirm=lambda _: False, session_tools=tools,
+                          approved_tools={"tmdb__search_movies"})
+    output: list[str] = []
+
+    run_chat(_scripted_input("/mcp"), output.append, asyncio.run, context)
+
+    assert "  tmdb__search_movies (aprovada nesta sessão)" in output
+    assert "  tmdb__get_trending (pede aprovação)" in output
+
+
+def test_mcp_add_command_keeps_server_arguments_after_the_command():
+    args = _build_parser().parse_args(
+        ["mcp", "add", "tmdb", "--cwd", "C:/tmdb-mcp", "C:/tmdb-mcp/.venv/Scripts/python.exe", "-m", "tmdb_mcp"]
+    )
+
+    assert (args.name, args.cwd, args.server_command) == ("tmdb", "C:/tmdb-mcp", "C:/tmdb-mcp/.venv/Scripts/python.exe")
+    assert args.server_args == ["-m", "tmdb_mcp"]
 
 
 @patch("cli.chat_cli.AgentService")

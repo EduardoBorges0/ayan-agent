@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +48,8 @@ class ToolContext:
     workspace: Path
     confirm: Callable[[str], bool]
     approved_folders: set[Path] = field(default_factory=set)
+    session_tools: tuple[AgentTool, ...] = ()
+    approved_tools: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
