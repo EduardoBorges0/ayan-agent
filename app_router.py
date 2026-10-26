@@ -5,6 +5,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from controller.chat_controller import router as chat_router
 from controller.health_controller import router as health_router
 from load_env import CORS_ORIGINS, LOG_LEVEL
 from utils.logging_config import configure_logging, request_id_ctx
@@ -40,5 +41,6 @@ app.add_middleware(
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(router=health_router, prefix="/health", tags=["health"])
+api_router.include_router(router=chat_router, prefix="/chat", tags=["chat"])
 
 app.include_router(api_router)
