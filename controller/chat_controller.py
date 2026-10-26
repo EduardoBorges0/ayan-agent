@@ -7,6 +7,7 @@ router = APIRouter()
 
 _ERRORS = {
     "last_message_not_from_user": (422, "A última mensagem tem de ser do utilizador."),
+    "llm_auth_failed": (502, "O serviço de IA está indisponível. Tente novamente mais tarde."),
     "llm_unavailable": (502, "O serviço de IA está indisponível. Tente novamente mais tarde."),
     "empty_reply": (502, "O serviço de IA não devolveu resposta."),
 }

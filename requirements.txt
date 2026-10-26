@@ -3,3 +3,4 @@ uvicorn[standard]==0.54.0
 pydantic==2.14.1
 python-dotenv==1.2.4
 openai==3.39.0
+keyring==25.7.0

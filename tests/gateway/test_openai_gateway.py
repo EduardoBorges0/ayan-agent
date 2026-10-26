@@ -4,7 +4,7 @@ import httpx
 import openai
 import pytest
 
-from data.gateway.openai_gateway import LLMUnavailableError, OpenAIGateway
+from data.gateway.openai_gateway import LLMAuthenticationError, LLMUnavailableError, OpenAIGateway
 from data.model.chat_model import ChatMessage
 
 MESSAGES = [
@@ -48,4 +48,17 @@ async def test_generate_reply_raises_llm_unavailable_when_sdk_fails(mock_connect
     )
 
     with pytest.raises(LLMUnavailableError):
+        await OpenAIGateway.generate_reply(MESSAGES, "instruções de teste")
+
+
+@pytest.mark.asyncio
+@patch("data.gateway.openai_gateway.OpenAIConnect")
+async def test_generate_reply_raises_authentication_error_when_key_is_rejected(mock_connect):
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    error = openai.AuthenticationError(
+        "Incorrect API key", response=httpx.Response(401, request=request), body=None
+    )
+    mock_connect.get_client.return_value = _client_returning(side_effect=error)
+
+    with pytest.raises(LLMAuthenticationError):
         await OpenAIGateway.generate_reply(MESSAGES, "instruções de teste")

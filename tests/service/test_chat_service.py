@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from data.gateway.openai_gateway import LLMUnavailableError
+from data.gateway.openai_gateway import LLMAuthenticationError, LLMUnavailableError
 from data.model.chat_model import ChatMessage
 from service.chat_service import ChatService
 
@@ -40,6 +40,16 @@ async def test_reply_returns_llm_unavailable_when_gateway_fails(mock_gateway):
     result = await ChatService.reply(USER_MESSAGES)
 
     assert result == {"success": False, "error": "llm_unavailable"}
+
+
+@pytest.mark.asyncio
+@patch("service.chat_service.OpenAIGateway")
+async def test_reply_returns_llm_auth_failed_when_key_is_rejected(mock_gateway):
+    mock_gateway.generate_reply = AsyncMock(side_effect=LLMAuthenticationError())
+
+    result = await ChatService.reply(USER_MESSAGES)
+
+    assert result == {"success": False, "error": "llm_auth_failed"}
 
 
 @pytest.mark.asyncio

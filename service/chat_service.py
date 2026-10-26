@@ -1,4 +1,4 @@
-from data.gateway.openai_gateway import LLMUnavailableError, OpenAIGateway
+from data.gateway.openai_gateway import LLMAuthenticationError, LLMUnavailableError, OpenAIGateway
 from data.model.chat_model import ChatMessage, ChatResponse
 
 SYSTEM_INSTRUCTIONS = "És um assistente útil. Responde em português de Portugal, de forma clara e direta."
@@ -12,6 +12,8 @@ class ChatService:
 
         try:
             text = await OpenAIGateway.generate_reply(messages, SYSTEM_INSTRUCTIONS)
+        except LLMAuthenticationError:
+            return {"success": False, "error": "llm_auth_failed"}
         except LLMUnavailableError:
             return {"success": False, "error": "llm_unavailable"}
 
