@@ -45,6 +45,7 @@ class AgentReply:
 class ToolContext:
     workspace: Path
     confirm: Callable[[str], bool]
+    approved_folders: set[Path] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

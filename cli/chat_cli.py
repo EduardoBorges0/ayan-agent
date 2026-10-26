@@ -12,6 +12,7 @@ from config.connections.openai_connection import OpenAIConnect
 from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
 from service.agent.agent_service import AgentService
+from service.agent.computer_tools import initial_approved_folders
 from service.chat_service import ChatService
 from service.memory_service import MemoryService
 from utils.logging_config import configure_logging
@@ -196,7 +197,14 @@ def _start_chat(run: Runner) -> None:
         print("Primeira utilização: configura a tua chave da OpenAI.")
         configure(run)
     OpenAIConnect.configure(user_settings.get_api_key(), user_settings.get_model())
-    run_chat(input, print, run, ToolContext(workspace=Path.cwd(), confirm=confirm_action))
+    workspace = Path.cwd()
+    approved_folders = initial_approved_folders(workspace)
+    if not approved_folders:
+        print(
+            f"Aviso: {workspace} é uma pasta demasiado ampla. Vou pedir-te autorização antes de ler "
+            "qualquer pasta. Para trabalhar sem tantas perguntas, abre o ayan na pasta do teu projeto."
+        )
+    run_chat(input, print, run, ToolContext(workspace, confirm_action, approved_folders))
 
 
 def main(argv: list[str] | None = None) -> int:

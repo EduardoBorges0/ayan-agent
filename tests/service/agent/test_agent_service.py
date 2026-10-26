@@ -10,7 +10,11 @@ from data.model.memory_model import Memory
 from service.agent.agent_service import MAX_TOOL_ROUNDS, AgentService
 
 USER_MESSAGES = [ChatMessage(role="user", content="Que ficheiros há aqui?")]
-CONTEXT = ToolContext(workspace=Path("C:/projetos/demo"), confirm=lambda _: False)
+CONTEXT = ToolContext(
+    workspace=Path("C:/projetos/demo"),
+    confirm=lambda _: False,
+    approved_folders={Path("C:/projetos/demo").resolve()},
+)
 
 
 def _no_memories() -> AsyncMock:

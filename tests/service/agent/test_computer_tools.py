@@ -6,22 +6,54 @@ import pytest
 
 from data.model.agent_model import ToolContext
 from data.model.computer_model import CommandResult, DirectoryEntry, FileContent
-from service.agent.computer_tools import COMPUTER_TOOLS, MAX_FILE_BYTES, REFUSED
+from service.agent.computer_tools import (
+    COMPUTER_TOOLS,
+    MAX_FILE_BYTES,
+    REFUSED,
+    initial_approved_folders,
+    is_broad_folder,
+)
 
 TOOLS = {tool.definition.name: tool for tool in COMPUTER_TOOLS}
 
 
-def _context(workspace: Path, approve: bool = False) -> tuple[ToolContext, MagicMock]:
+def _context(
+    workspace: Path, approve: bool = False, approved: set[Path] | None = None
+) -> tuple[ToolContext, MagicMock]:
     confirm = MagicMock(return_value=approve)
-    return ToolContext(workspace=workspace, confirm=confirm), confirm
+    folders = {workspace.resolve()} if approved is None else approved
+    return ToolContext(workspace=workspace, confirm=confirm, approved_folders=folders), confirm
 
 
 def _args(**values) -> str:
     return json.dumps(values)
 
 
+@pytest.fixture
+def home(tmp_path, monkeypatch) -> Path:
+    home_dir = tmp_path / "Users" / "eduardo"
+    home_dir.mkdir(parents=True)
+    monkeypatch.setattr("service.agent.computer_tools._home", lambda: home_dir)
+    return home_dir
+
+
+def test_project_folder_is_approved_from_the_start(home):
+    project = home / "Documents" / "code" / "api"
+    project.mkdir(parents=True)
+
+    assert initial_approved_folders(project) == {project.resolve()}
+
+
+@pytest.mark.parametrize("folder", ["home", "parent_of_home", "drive_root"])
+def test_broad_folders_are_never_approved_from_the_start(home, folder):
+    workspace = {"home": home, "parent_of_home": home.parent, "drive_root": Path(home.anchor)}[folder]
+
+    assert is_broad_folder(workspace) is True
+    assert initial_approved_folders(workspace) == set()
+
+
 @pytest.mark.asyncio
-async def test_read_file_inside_workspace_does_not_ask_for_confirmation(tmp_path):
+async def test_read_file_in_approved_folder_does_not_ask_for_confirmation(tmp_path):
     (tmp_path / "notas.txt").write_text("Revisão da grua concluída.", encoding="utf-8")
     context, confirm = _context(tmp_path)
 
@@ -32,19 +64,48 @@ async def test_read_file_inside_workspace_does_not_ask_for_confirmation(tmp_path
 
 
 @pytest.mark.asyncio
-@patch("service.agent.computer_tools.FilesystemGateway")
-async def test_read_file_outside_workspace_is_not_read_when_user_refuses(mock_fs, tmp_path):
-    context, confirm = _context(tmp_path / "projeto", approve=False)
+async def test_approving_a_folder_once_covers_its_subfolders_for_the_session(home):
+    project = home / "Documents" / "code" / "api"
+    (project / "src").mkdir(parents=True)
+    (project / "src" / "main.py").write_text("print('ok')", encoding="utf-8")
+    context, confirm = _context(home, approve=True, approved=set())
 
-    outcome = await TOOLS["read_file"].run(_args(path=str(tmp_path / "segredos.txt")), context)
+    await TOOLS["list_directory"].run(_args(path=str(project)), context)
+    outcome = await TOOLS["read_file"].run(_args(path=str(project / "src" / "main.py")), context)
+
+    assert outcome.output == "print('ok')"
+    confirm.assert_called_once()
+    assert "aceder à pasta" in confirm.call_args.args[0]
+    assert context.approved_folders == {project.resolve()}
+
+
+@pytest.mark.asyncio
+@patch("service.agent.computer_tools.FilesystemGateway")
+async def test_refused_folder_is_not_read_nor_remembered(mock_fs, home):
+    project = home / "Documents"
+    context, _ = _context(home, approve=False, approved=set())
+
+    outcome = await TOOLS["read_file"].run(_args(path=str(project / "segredos.txt")), context)
 
     assert outcome.output == REFUSED
-    assert "fora da pasta atual" in confirm.call_args.args[0]
+    assert context.approved_folders == set()
     mock_fs.read_bytes.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_parent_folder_escape_counts_as_outside_workspace(tmp_path):
+async def test_broad_folder_access_asks_every_time_and_is_never_remembered(home):
+    context, confirm = _context(home, approve=True, approved=set())
+
+    await TOOLS["list_directory"].run(_args(path="."), context)
+    await TOOLS["list_directory"].run(_args(path="."), context)
+
+    assert confirm.call_count == 2
+    assert "só para este acesso" in confirm.call_args.args[0]
+    assert context.approved_folders == set()
+
+
+@pytest.mark.asyncio
+async def test_parent_folder_escape_is_not_covered_by_approved_folder(tmp_path):
     workspace = tmp_path / "projeto"
     workspace.mkdir()
     (tmp_path / "fora.txt").write_text("x", encoding="utf-8")
@@ -54,17 +115,6 @@ async def test_parent_folder_escape_counts_as_outside_workspace(tmp_path):
 
     assert outcome.output == REFUSED
     confirm.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_read_file_outside_workspace_is_read_when_user_approves(tmp_path):
-    outside = tmp_path / "fora.txt"
-    outside.write_text("conteúdo", encoding="utf-8")
-    context, _ = _context(tmp_path / "projeto", approve=True)
-
-    outcome = await TOOLS["read_file"].run(_args(path=str(outside)), context)
-
-    assert outcome.output == "conteúdo"
 
 
 @pytest.mark.asyncio
@@ -117,7 +167,17 @@ async def test_read_file_reports_missing_file_to_model(tmp_path):
     outcome = await TOOLS["read_file"].run(_args(path="nao_existe.txt"), context)
 
     assert outcome.output.startswith("Erro ao ler")
-    assert outcome.event is None
+    assert outcome.event.startswith("Não consegui ler")
+
+
+@pytest.mark.asyncio
+async def test_list_directory_failure_is_shown_to_user(tmp_path):
+    context, _ = _context(tmp_path)
+
+    outcome = await TOOLS["list_directory"].run(_args(path="code/api"), context)
+
+    assert outcome.output.startswith("Erro ao listar")
+    assert outcome.event.startswith(f"Não consegui listar {(tmp_path / 'code' / 'api').resolve()}")
 
 
 @pytest.mark.asyncio

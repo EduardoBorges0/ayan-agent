@@ -29,10 +29,32 @@ def _resolve(path_text: str, workspace: Path) -> Path:
     return (path if path.is_absolute() else workspace / path).resolve()
 
 
-def _allowed_outside_workspace(path: Path, context: ToolContext, action: str) -> bool:
-    if path.is_relative_to(context.workspace.resolve()):
+def _home() -> Path:
+    return Path.home()
+
+
+def is_broad_folder(folder: Path) -> bool:
+    folder = folder.resolve()
+    return folder.parent == folder or _home().resolve().is_relative_to(folder)
+
+
+def initial_approved_folders(workspace: Path) -> set[Path]:
+    workspace = workspace.resolve()
+    return set() if is_broad_folder(workspace) else {workspace}
+
+
+def _has_read_access(path: Path, folder: Path, context: ToolContext, action: str) -> bool:
+    if any(path.is_relative_to(approved) for approved in context.approved_folders):
         return True
-    return context.confirm(f"{action} fora da pasta atual:\n    {path}")
+    if is_broad_folder(folder):
+        return context.confirm(
+            f"{action}\n    Esta autorização vale só para este acesso, porque {folder} é uma pasta "
+            "demasiado ampla para aprovar por inteiro."
+        )
+    if context.confirm(f"aceder à pasta {folder} (e subpastas) durante esta sessão, para {action}"):
+        context.approved_folders.add(folder)
+        return True
+    return False
 
 
 def _decode(data: bytes, truncated: bool) -> str:
@@ -52,14 +74,18 @@ def _truncate(text: str) -> str:
 
 async def _read_file(arguments: str, context: ToolContext) -> ToolOutcome:
     path = _resolve(_PathArgs.model_validate_json(arguments).path, context.workspace)
-    if not _allowed_outside_workspace(path, context, "ler um ficheiro"):
+    if not _has_read_access(path, path.parent, context, f"ler o ficheiro {path}"):
         return ToolOutcome(REFUSED, f"Recusaste a leitura de {path}")
     try:
         content = await asyncio.to_thread(FilesystemGateway.read_bytes, path, MAX_FILE_BYTES)
     except OSError as exc:
-        return ToolOutcome(f"Erro ao ler {path}: {exc.strerror or exc}")
+        reason = exc.strerror or str(exc)
+        return ToolOutcome(f"Erro ao ler {path}: {reason}", f"Não consegui ler {path}: {reason}")
     if b"\x00" in content.data:
-        return ToolOutcome(f"Erro: {path} parece ser um ficheiro binário e não pode ser lido como texto.")
+        return ToolOutcome(
+            f"Erro: {path} parece ser um ficheiro binário e não pode ser lido como texto.",
+            f"Não li {path}: é um ficheiro binário",
+        )
 
     truncated = content.total_size > MAX_FILE_BYTES
     text = _decode(content.data, truncated)
@@ -70,12 +96,13 @@ async def _read_file(arguments: str, context: ToolContext) -> ToolOutcome:
 
 async def _list_directory(arguments: str, context: ToolContext) -> ToolOutcome:
     path = _resolve(_PathArgs.model_validate_json(arguments).path, context.workspace)
-    if not _allowed_outside_workspace(path, context, "listar uma pasta"):
+    if not _has_read_access(path, path, context, f"listar a pasta {path}"):
         return ToolOutcome(REFUSED, f"Recusaste a listagem de {path}")
     try:
         entries = await asyncio.to_thread(FilesystemGateway.list_directory, path)
     except OSError as exc:
-        return ToolOutcome(f"Erro ao listar {path}: {exc.strerror or exc}")
+        reason = exc.strerror or str(exc)
+        return ToolOutcome(f"Erro ao listar {path}: {reason}", f"Não consegui listar {path}: {reason}")
 
     entries.sort(key=lambda entry: (not entry.is_dir, entry.name.casefold()))
     lines = [
@@ -112,7 +139,8 @@ async def _run_powershell(arguments: str, context: ToolContext) -> ToolOutcome:
             PowerShellGateway.run, command, context.workspace, AGENT_COMMAND_TIMEOUT_SECONDS
         )
     except OSError as exc:
-        return ToolOutcome(f"Erro ao iniciar o PowerShell: {exc.strerror or exc}")
+        reason = exc.strerror or str(exc)
+        return ToolOutcome(f"Erro ao iniciar o PowerShell: {reason}", f"Não consegui iniciar o PowerShell: {reason}")
     output, status = _format_command_result(result)
     return ToolOutcome(output, status)
 
