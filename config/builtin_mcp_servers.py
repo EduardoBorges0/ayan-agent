@@ -19,4 +19,14 @@ def builtin_server_configs() -> list[McpServerConfig]:
             env={"TMDB_API_KEY": tmdb_api_key},
             trusted=True,
         ))
+    lastfm_api_key = user_settings.get_lastfm_api_key()
+    if lastfm_api_key:
+        servers.append(McpServerConfig(
+            name="lastfm",
+            command=sys.executable,
+            args=["-m", "mcp_servers.lastfm_mcp"],
+            cwd=str(PROJECT_ROOT),
+            env={"LASTFM_API_KEY": lastfm_api_key},
+            trusted=True,
+        ))
     return servers

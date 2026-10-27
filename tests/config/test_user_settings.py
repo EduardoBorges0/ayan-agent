@@ -37,3 +37,23 @@ def test_saved_model_is_read_back_from_user_config_dir(tmp_path):
         user_settings.save_model("modelo-de-teste")
 
         assert user_settings.get_model() == "modelo-de-teste"
+
+
+@patch("config.user_settings.keyring")
+@patch("config.user_settings.LASTFM_API_KEY", "chave-do-ambiente")
+def test_lastfm_env_key_takes_priority_over_stored_key(mock_keyring):
+    mock_keyring.get_password.return_value = "chave-guardada"
+
+    assert user_settings.get_lastfm_api_key() == "chave-do-ambiente"
+
+
+@patch("config.user_settings.keyring")
+@patch("config.user_settings.LASTFM_API_KEY", None)
+def test_lastfm_key_is_stored_in_and_read_from_keyring(mock_keyring):
+    mock_keyring.get_password.return_value = "chave-guardada"
+
+    user_settings.save_lastfm_api_key("chave-nova")
+
+    mock_keyring.set_password.assert_called_once_with("ayan", "lastfm_api_key", "chave-nova")
+    assert user_settings.get_lastfm_api_key() == "chave-guardada"
+    mock_keyring.get_password.assert_called_once_with("ayan", "lastfm_api_key")

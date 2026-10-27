@@ -34,13 +34,16 @@ def test_choose_model_ignores_enter_when_current_model_is_not_in_list():
     assert model == "o3"
 
 
+@patch("cli.chat_cli.configure_lastfm")
 @patch("cli.chat_cli.configure_tmdb")
 @patch("cli.chat_cli.OpenAIConnect")
 @patch("cli.chat_cli.choose_model", return_value="gpt-4o-mini")
 @patch("cli.chat_cli.ChatService")
 @patch("cli.chat_cli._prompt_api_key", side_effect=["chave-rejeitada", "chave-valida"])
 @patch("cli.chat_cli.user_settings")
-def test_configure_never_saves_a_rejected_key(mock_settings, _prompt, mock_service, _choose, _connect, _tmdb):
+def test_configure_never_saves_a_rejected_key(
+    mock_settings, _prompt, mock_service, _choose, _connect, _tmdb, _lastfm
+):
     mock_settings.get_api_key.return_value = None
     mock_settings.get_model.return_value = None
     mock_settings.api_key_comes_from_env.return_value = False

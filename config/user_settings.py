@@ -3,11 +3,12 @@ import json
 import keyring
 from keyring.errors import PasswordDeleteError
 
-from load_env import OPENAI_API_KEY, OPENAI_MODEL, TMDB_API_KEY, USER_CONFIG_DIR
+from load_env import LASTFM_API_KEY, OPENAI_API_KEY, OPENAI_MODEL, TMDB_API_KEY, USER_CONFIG_DIR
 
 _KEYRING_SERVICE = "ayan"
 _KEYRING_USERNAME = "openai_api_key"
 _TMDB_KEYRING_USERNAME = "tmdb_api_key"
+_LASTFM_KEYRING_USERNAME = "lastfm_api_key"
 
 
 def _settings_path():
@@ -40,6 +41,14 @@ def get_tmdb_api_key() -> str | None:
 
 def save_tmdb_api_key(api_key: str) -> None:
     keyring.set_password(_KEYRING_SERVICE, _TMDB_KEYRING_USERNAME, api_key)
+
+
+def get_lastfm_api_key() -> str | None:
+    return LASTFM_API_KEY or keyring.get_password(_KEYRING_SERVICE, _LASTFM_KEYRING_USERNAME)
+
+
+def save_lastfm_api_key(api_key: str) -> None:
+    keyring.set_password(_KEYRING_SERVICE, _LASTFM_KEYRING_USERNAME, api_key)
 
 
 def get_model() -> str | None:

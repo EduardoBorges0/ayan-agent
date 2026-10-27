@@ -13,6 +13,7 @@ from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
 from data.model.mcp_model import McpServerConfig
 from load_env import MCP_CONFIG_PATH
+from mcp_servers.lastfm_mcp.service.credentials_service import CredentialsService as LastFmCredentialsService
 from mcp_servers.tmdb_mcp.service.credentials_service import CredentialsService as TmdbCredentialsService
 from service.agent.agent_service import AgentService
 from service.agent.computer_tools import initial_approved_folders
@@ -202,6 +203,7 @@ def configure(run: Runner) -> None:
     if user_settings.api_key_comes_from_env():
         print("Atenção: a variável OPENAI_API_KEY está definida e tem prioridade sobre a chave guardada.")
     configure_tmdb(run)
+    configure_lastfm(run)
 
 
 def configure_tmdb(
@@ -228,6 +230,32 @@ def configure_tmdb(
                   "Tenta mais tarde com 'ayan config'.")
             return
         write("O TMDB rejeitou esta chave. Confirma-a e tenta novamente.")
+
+
+def configure_lastfm(
+    run: Runner,
+    read_secret: Callable[[str], str] = getpass.getpass,
+    write: Callable[[str], None] = print,
+) -> None:
+    hint = "Enter para manter a atual" if user_settings.get_lastfm_api_key() else "Enter para saltar"
+    write(
+        "\nLast.fm (opcional): permite ao agente consultar informação sobre artistas e álbuns. "
+        "A chave está em https://www.last.fm/api/account/create"
+    )
+    while True:
+        api_key = read_secret(f"Chave API do Last.fm ({hint}): ").strip()
+        if not api_key:
+            return
+        result = run(LastFmCredentialsService.validate_key(api_key))
+        if result["success"]:
+            user_settings.save_lastfm_api_key(result["data"])
+            write("Chave do Last.fm validada e guardada no Gestor de Credenciais do Windows.")
+            return
+        if result["error"] != "invalid_key":
+            write(f"Não foi possível contactar o Last.fm para validar a chave ({result.get('detail')}). "
+                  "Tenta mais tarde com 'ayan config'.")
+            return
+        write("O Last.fm rejeitou esta chave. Confirma-a e tenta novamente.")
 
 
 def logout() -> None:
