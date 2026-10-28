@@ -8,6 +8,7 @@ from data.model.agent_model import AgentTool, ModelTurn, ToolCall, ToolContext, 
 from data.model.chat_model import ChatMessage
 from data.model.memory_model import Memory
 from service.agent.agent_service import MAX_TOOL_ROUNDS, AgentService
+from service.personality_service import DEFAULT_PERSONALITY
 
 USER_MESSAGES = [ChatMessage(role="user", content="Que ficheiros há aqui?")]
 CONTEXT = ToolContext(
@@ -15,6 +16,13 @@ CONTEXT = ToolContext(
     confirm=lambda _: False,
     approved_folders={Path("C:/projetos/demo").resolve()},
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_personality():
+    with patch("service.agent.agent_service.PersonalityService") as mock_service:
+        mock_service.get_personality = AsyncMock(return_value={"success": True, "data": DEFAULT_PERSONALITY})
+        yield mock_service
 
 
 def _no_memories() -> AsyncMock:
@@ -47,7 +55,9 @@ async def test_all_tools_are_offered_to_the_model(mock_gateway, mock_memory):
     await AgentService.reply(USER_MESSAGES, CONTEXT)
 
     offered = {tool.name for tool in mock_gateway.generate_turn.call_args.args[2]}
-    assert offered == {"save_memory", "forget_memory", "read_file", "list_directory", "run_powershell"}
+    assert offered == {
+        "save_memory", "forget_memory", "update_personality", "read_file", "list_directory", "run_powershell",
+    }
 
 
 @pytest.mark.asyncio
@@ -137,3 +147,56 @@ async def test_llm_failure_returns_reason(mock_gateway, mock_memory):
     result = await AgentService.reply(USER_MESSAGES, CONTEXT)
 
     assert result == {"success": False, "error": "llm_unavailable", "detail": "HTTP 404: modelo sem acesso"}
+
+
+@pytest.mark.asyncio
+@patch("service.agent.agent_service.MemoryService")
+@patch("service.agent.agent_service.OpenAIGateway")
+async def test_instructions_include_current_personality(mock_gateway, mock_memory, mock_personality):
+    mock_memory.list_memories = _no_memories()
+    mock_personality.get_personality = AsyncMock(return_value={"success": True, "data": "Fazes piadas sobre os temas."})
+    mock_gateway.generate_turn = AsyncMock(return_value=ModelTurn(text="Olá!"))
+
+    await AgentService.reply(USER_MESSAGES, CONTEXT)
+
+    instructions = mock_gateway.generate_turn.call_args.args[1]
+    assert instructions.endswith("Personalidade atual:\nFazes piadas sobre os temas.")
+
+
+@pytest.mark.asyncio
+@patch("service.agent.agent_service.MemoryService")
+@patch("service.agent.agent_service.OpenAIGateway")
+async def test_unreadable_personality_falls_back_to_default_and_warns_user(mock_gateway, mock_memory, mock_personality):
+    mock_memory.list_memories = _no_memories()
+    mock_personality.get_personality = AsyncMock(return_value={"success": False, "error": "personality_unreadable"})
+    mock_gateway.generate_turn = AsyncMock(return_value=ModelTurn(text="Olá!"))
+
+    result = await AgentService.reply(USER_MESSAGES, CONTEXT)
+
+    assert mock_gateway.generate_turn.call_args.args[1].endswith(f"Personalidade atual:\n{DEFAULT_PERSONALITY}")
+    assert result["success"] is True
+    assert result["data"].events == ["Não consegui ler o ficheiro da personalidade; usei a personalidade padrão."]
+
+
+@pytest.mark.asyncio
+@patch("service.agent.personality_tools.PersonalityService")
+@patch("service.agent.agent_service.MemoryService")
+@patch("service.agent.agent_service.OpenAIGateway")
+async def test_updated_personality_is_used_in_the_same_reply(mock_gateway, mock_memory, mock_tool_service, mock_personality):
+    mock_memory.list_memories = _no_memories()
+    mock_personality.get_personality = AsyncMock(side_effect=[
+        {"success": True, "data": "Antiga."},
+        {"success": True, "data": "Fazes piadas sobre os temas."},
+    ])
+    mock_tool_service.update_personality = AsyncMock(return_value={"success": True, "data": "Fazes piadas sobre os temas."})
+    mock_gateway.generate_turn = AsyncMock(side_effect=[
+        ModelTurn(text="", tool_calls=[ToolCall("c1", "update_personality", '{"content": "Fazes piadas sobre os temas."}')]),
+        ModelTurn(text="Feito, e prometo piadas!"),
+    ])
+
+    result = await AgentService.reply(USER_MESSAGES, CONTEXT)
+
+    first_instructions, second_instructions = (call.args[1] for call in mock_gateway.generate_turn.call_args_list)
+    assert first_instructions.endswith("Personalidade atual:\nAntiga.")
+    assert second_instructions.endswith("Personalidade atual:\nFazes piadas sobre os temas.")
+    assert result["data"].events == ["Atualizei a minha personalidade (vê-a com /personalidade)."]

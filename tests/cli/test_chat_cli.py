@@ -151,6 +151,34 @@ def test_command_is_recognized_even_with_byte_order_mark_from_piped_input(mock_a
     mock_memory.list_memories.assert_awaited_once()
 
 
+@patch("cli.chat_cli.PersonalityService")
+@patch("cli.chat_cli.AgentService")
+def test_personality_command_shows_current_personality_without_calling_the_model(mock_agent, mock_personality):
+    mock_agent.reply = AsyncMock()
+    mock_personality.get_personality = AsyncMock(
+        return_value={"success": True, "data": "Fazes piadas.\nUsas exemplos simples."}
+    )
+    output: list[str] = []
+
+    run_chat(_scripted_input("/personalidade"), output.append, asyncio.run, CONTEXT)
+
+    assert "  Fazes piadas." in output
+    assert "  Usas exemplos simples." in output
+    mock_agent.reply.assert_not_called()
+
+
+@patch("cli.chat_cli.PersonalityService")
+@patch("cli.chat_cli.AgentService")
+def test_personality_command_explains_when_file_cannot_be_read(mock_agent, mock_personality):
+    mock_personality.get_personality = AsyncMock(return_value={"success": False, "error": "personality_unreadable"})
+    output: list[str] = []
+
+    run_chat(_scripted_input("/personalidade"), output.append, asyncio.run, CONTEXT)
+
+    assert any("Não consegui ler" in line and "UTF-8" in line for line in output)
+    mock_agent.reply.assert_not_called()
+
+
 def test_mcp_command_lists_session_tools_and_their_approval(monkeypatch):
     tools = tuple(
         AgentTool(ToolDefinition(name=name, description="", parameters={}), AsyncMock())

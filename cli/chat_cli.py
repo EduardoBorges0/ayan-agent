@@ -12,7 +12,7 @@ from config.connections.openai_connection import OpenAIConnect
 from data.model.agent_model import ToolContext
 from data.model.chat_model import MAX_HISTORY_MESSAGES, ChatMessage
 from data.model.mcp_model import McpServerConfig
-from load_env import MCP_CONFIG_PATH
+from load_env import MCP_CONFIG_PATH, PERSONALITY_PATH
 from mcp_servers.lastfm_mcp.service.credentials_service import CredentialsService as LastFmCredentialsService
 from mcp_servers.tmdb_mcp.service.credentials_service import CredentialsService as TmdbCredentialsService
 from service.agent.agent_service import AgentService
@@ -20,16 +20,18 @@ from service.agent.computer_tools import initial_approved_folders
 from service.agent.mcp_tools import McpToolsService
 from service.chat_service import ChatService
 from service.memory_service import MemoryService
+from service.personality_service import PersonalityService
 from utils.logging_config import configure_logging
 
 EXIT_COMMANDS = {"/sair", "/exit"}
 CLEAR_COMMAND = "/limpar"
 MEMORY_COMMAND = "/memoria"
 FORGET_COMMAND = "/esquecer"
+PERSONALITY_COMMAND = "/personalidade"
 MCP_COMMAND = "/mcp"
 WELCOME_TEXT = (
     "Escreve a tua mensagem. Comandos: /memoria (ver o que sei sobre ti), /esquecer N (apagar a memória N), "
-    "/mcp (ferramentas MCP ligadas), /limpar (nova conversa), /sair (terminar)."
+    "/personalidade (ver como eu sou), /mcp (ferramentas MCP ligadas), /limpar (nova conversa), /sair (terminar)."
 )
 
 _ERROR_MESSAGES = {
@@ -82,6 +84,9 @@ def run_chat(
         if text.lower().split()[0] == FORGET_COMMAND:
             _forget_memory(text, write, run)
             continue
+        if text.lower() == PERSONALITY_COMMAND:
+            _show_personality(write, run)
+            continue
         if text.lower() == MCP_COMMAND:
             _show_mcp_tools(write, context)
             continue
@@ -126,6 +131,18 @@ def _forget_memory(text: str, write: Callable[[str], None], run: Runner) -> None
         write(f"Esqueci: {result['data'].content}")
     else:
         write("Não existe nenhuma memória com esse número.")
+
+
+def _show_personality(write: Callable[[str], None], run: Runner) -> None:
+    result = run(PersonalityService.get_personality())
+    if not result["success"]:
+        write(f"Não consegui ler {PERSONALITY_PATH}. Confirma que o ficheiro existe e está guardado em UTF-8.")
+        return
+    write(f"A minha personalidade ({PERSONALITY_PATH}):")
+    for line in result["data"].splitlines():
+        write(f"  {line}")
+    write("Para a mudar, diz-me como queres que eu seja ou edita o ficheiro.")
+    write("A mudança vale logo na mensagem seguinte.")
 
 
 def _show_mcp_tools(write: Callable[[str], None], context: ToolContext) -> None:

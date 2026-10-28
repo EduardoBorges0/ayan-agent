@@ -19,6 +19,7 @@ USER_CONFIG_DIR = Path(os.getenv("APPDATA") or Path.home() / ".config") / "ayan"
 AYAN_DB_PATH = USER_CONFIG_DIR / "ayan.db"
 AGENT_COMMAND_TIMEOUT_SECONDS = int(os.getenv("AGENT_COMMAND_TIMEOUT_SECONDS", "120"))
 MCP_CONFIG_PATH = USER_CONFIG_DIR / "mcp.json"
+PERSONALITY_PATH = USER_CONFIG_DIR / "personality.md"
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 MCP_TIMEOUT_SECONDS = float(os.getenv("MCP_TIMEOUT_SECONDS", "60"))
