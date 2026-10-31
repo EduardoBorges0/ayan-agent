@@ -1,4 +1,6 @@
 import logging
+import re
+from typing import Literal
 
 import httpx
 
@@ -10,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 MAX_CAST = 10
+_RANGE_SUFFIX = re.compile(r"_(gte|lte)$")
+
+MediaKind = Literal["movie", "tv"]
+Relation = Literal["similar", "recommendations"]
 
 
 class TmdbAuthError(Exception):
@@ -63,14 +69,20 @@ def video_languages(language: str) -> str:
     return f"{language.split('-')[0]},en,null"
 
 
+def discover_params(filters: dict) -> dict:
+    # Os filtros usam "_gte"/"_lte" nos nomes; a API do TMDB usa ".gte"/".lte".
+    return {_RANGE_SUFFIX.sub(r".\1", name): value for name, value in filters.items() if value is not None}
+
+
 def map_page(raw: dict | None, map_item) -> Page:
     if raw is None:
         return Page(page=1, total_pages=0, total_results=0, results=[])
+    items = (map_item(item) for item in raw.get("results", []))
     return Page(
         page=raw["page"],
         total_pages=raw["total_pages"],
         total_results=raw["total_results"],
-        results=[map_item(item) for item in raw.get("results", [])],
+        results=[item for item in items if item is not None],
     )
 
 

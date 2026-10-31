@@ -1,4 +1,5 @@
-from mcp_servers.tmdb_mcp.data.gateway.tmdb.movie_gateway import MovieGateway
+from mcp_servers.tmdb_mcp.data.gateway.tmdb.movie_gateway import MovieGateway, MovieListCategory
+from mcp_servers.tmdb_mcp.data.gateway.tmdb.tmdb_api import Relation
 from mcp_servers.tmdb_mcp.load_env import TMDB_LANGUAGE
 from mcp_servers.tmdb_mcp.service.tmdb_call import clean_query, tmdb_call
 
@@ -12,9 +13,17 @@ class MovieService:
         return await tmdb_call(MovieGateway.search(query, page, year, TMDB_LANGUAGE))
 
     @staticmethod
+    async def discover(filters: dict, page: int = 1) -> dict:
+        return await tmdb_call(MovieGateway.discover(filters, page, TMDB_LANGUAGE))
+
+    @staticmethod
+    async def get_by_category(category: MovieListCategory, page: int = 1, region: str | None = None) -> dict:
+        return await tmdb_call(MovieGateway.get_by_category(category, page, region, TMDB_LANGUAGE))
+
+    @staticmethod
     async def get_details(movie_id: int) -> dict:
         return await tmdb_call(MovieGateway.get_details(movie_id, TMDB_LANGUAGE))
 
     @staticmethod
-    async def get_recommendations(movie_id: int, page: int = 1) -> dict:
-        return await tmdb_call(MovieGateway.get_recommendations(movie_id, page, TMDB_LANGUAGE))
+    async def get_related(movie_id: int, relation: Relation = "recommendations", page: int = 1) -> dict:
+        return await tmdb_call(MovieGateway.get_related(movie_id, relation, page, TMDB_LANGUAGE))

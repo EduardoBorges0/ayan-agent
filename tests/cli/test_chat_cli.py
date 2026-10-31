@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from cli.chat_cli import _build_parser, configure_lastfm, configure_tmdb, confirm_action, run_chat
 from data.model.agent_model import AgentReply, AgentTool, ToolContext, ToolDefinition
+from data.model.chat_model import ChatMessage, CompactedConversation
 from data.model.memory_model import Memory
 
 CONTEXT = ToolContext(workspace=Path("."), confirm=lambda _: False)
@@ -113,6 +114,7 @@ def test_memory_events_are_shown_before_reply(mock_service):
 @patch("cli.chat_cli.AgentService")
 def test_memory_command_lists_memories_without_calling_the_model(mock_agent, mock_memory):
     mock_agent.reply = AsyncMock()
+    mock_memory.get_summary = AsyncMock(return_value={"success": True, "data": None})
     mock_memory.list_memories = AsyncMock(return_value={
         "success": True, "data": [Memory(id=4, content="Trabalha na Almovi.", created_at="2026-10-26")],
     })
@@ -143,6 +145,7 @@ def test_forget_command_deletes_memory_by_number(mock_agent, mock_memory):
 @patch("cli.chat_cli.AgentService")
 def test_command_is_recognized_even_with_byte_order_mark_from_piped_input(mock_agent, mock_memory):
     mock_agent.reply = AsyncMock()
+    mock_memory.get_summary = AsyncMock(return_value={"success": True, "data": None})
     mock_memory.list_memories = AsyncMock(return_value={"success": True, "data": []})
 
     run_chat(_scripted_input("﻿/memoria"), lambda _: None, asyncio.run, CONTEXT)
@@ -298,3 +301,61 @@ def test_lastfm_step_gives_up_when_lastfm_cannot_be_reached(mock_settings, mock_
 
     read_secret.assert_called_once()
     mock_settings.save_lastfm_api_key.assert_not_called()
+
+
+@patch("cli.chat_cli.MemoryService")
+@patch("cli.chat_cli.AgentService")
+def test_memory_command_shows_summary_before_recent_memories(mock_agent, mock_memory):
+    mock_agent.reply = AsyncMock()
+    mock_memory.get_summary = AsyncMock(return_value={"success": True, "data": "Trabalha em TI."})
+    mock_memory.list_memories = AsyncMock(return_value={
+        "success": True, "data": [Memory(id=4, content="Gosta de tópicos.", created_at="2026-10-26")],
+    })
+    output: list[str] = []
+
+    run_chat(_scripted_input("/memoria"), output.append, asyncio.run, CONTEXT)
+
+    assert output.index("    Trabalha em TI.") < output.index("    4) Gosta de tópicos.")
+
+
+@patch("cli.chat_cli.ConversationSummaryService")
+@patch("cli.chat_cli.AgentService")
+def test_compacted_history_and_summary_are_what_the_agent_receives(mock_agent, mock_summary):
+    recent = [ChatMessage(role="user", content="Mensagem recente")]
+    mock_summary.compact = AsyncMock(return_value={
+        "success": True, "data": CompactedConversation(summary="Falámos de música.", messages=recent),
+    })
+    mock_agent.reply = AsyncMock(return_value=_ok("Certo."))
+
+    run_chat(_scripted_input("Olá"), lambda _: None, asyncio.run, CONTEXT)
+
+    assert [m.content for m in mock_agent.reply.call_args.args[0]] == ["Mensagem recente"]
+    assert mock_agent.reply.call_args.kwargs["conversation_summary"] == "Falámos de música."
+
+
+@patch("cli.chat_cli.ConversationSummaryService")
+@patch("cli.chat_cli.AgentService")
+def test_failed_summary_does_not_block_the_conversation(mock_agent, mock_summary):
+    mock_summary.compact = AsyncMock(return_value={"success": False, "error": "llm_unavailable"})
+    mock_agent.reply = AsyncMock(return_value=_ok("Certo."))
+    output: list[str] = []
+
+    run_chat(_scripted_input("Olá"), output.append, asyncio.run, CONTEXT)
+
+    assert [m.content for m in mock_agent.reply.call_args.args[0]] == ["Olá"]
+    assert mock_agent.reply.call_args.kwargs["conversation_summary"] is None
+    assert "\nAyan: Certo." in output
+
+
+@patch("cli.chat_cli.ConversationSummaryService")
+@patch("cli.chat_cli.AgentService")
+def test_clear_command_discards_the_conversation_summary(mock_agent, mock_summary):
+    mock_summary.compact = AsyncMock(side_effect=lambda history, summary: {
+        "success": True, "data": CompactedConversation(summary="Resumo.", messages=history),
+    })
+    mock_agent.reply = AsyncMock(return_value=_ok("Certo."))
+
+    run_chat(_scripted_input("Olá", "/limpar", "Outra coisa"), lambda _: None, asyncio.run, CONTEXT)
+
+    assert mock_summary.compact.call_args_list[0].args[1] is None
+    assert mock_summary.compact.call_args_list[1].args[1] is None

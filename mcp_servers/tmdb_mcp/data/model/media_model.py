@@ -25,6 +25,7 @@ class MovieSummary(BaseModel):
     overview: str | None
     vote_average: float | None
     poster_url: str | None
+    vote_count: int | None = None
 
 
 class MovieDetails(MovieSummary):
@@ -47,6 +48,7 @@ class TvShowSummary(BaseModel):
     overview: str | None
     vote_average: float | None
     poster_url: str | None
+    vote_count: int | None = None
 
 
 class TvShowDetails(TvShowSummary):
@@ -70,7 +72,7 @@ class PersonSummary(BaseModel):
     profile_url: str | None
 
 
-class TrendingItem(BaseModel):
+class MediaItem(BaseModel):
     media_type: Literal["movie", "tv", "person"]
     id: int
     title: str
@@ -78,3 +80,34 @@ class TrendingItem(BaseModel):
     overview: str | None
     vote_average: float | None
     image_url: str | None
+    vote_count: int | None = None
+
+
+# Nome anterior de MediaItem, mantido por compatibilidade.
+TrendingItem = MediaItem
+
+
+class GenreSummary(BaseModel):
+    id: int
+    name: str
+
+
+class KeywordSummary(BaseModel):
+    id: int
+    name: str
+
+
+class CompanySummary(BaseModel):
+    id: int
+    name: str
+    origin_country: str | None
+
+
+class Credit(BaseModel):
+    media_type: Literal["movie", "tv"]
+    id: int
+    title: str
+    date: str | None
+    role: str | None
+    vote_average: float | None
+    vote_count: int | None

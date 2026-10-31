@@ -19,6 +19,7 @@ from service.agent.agent_service import AgentService
 from service.agent.computer_tools import initial_approved_folders
 from service.agent.mcp_tools import McpToolsService
 from service.chat_service import ChatService
+from service.conversation_summary_service import ConversationSummaryService
 from service.memory_service import MemoryService
 from service.personality_service import PersonalityService
 from utils.logging_config import configure_logging
@@ -64,6 +65,7 @@ def run_chat(
     read_line: Callable[[str], str], write: Callable[[str], None], run: Runner, context: ToolContext
 ) -> None:
     history: list[ChatMessage] = []
+    conversation_summary: str | None = None
     write(WELCOME_TEXT)
     while True:
         try:
@@ -76,6 +78,7 @@ def run_chat(
             return
         if text.lower() == CLEAR_COMMAND:
             history.clear()
+            conversation_summary = None
             write("Conversa limpa.")
             continue
         if text.lower() == MEMORY_COMMAND:
@@ -97,7 +100,14 @@ def run_chat(
             write("Mensagem demasiado longa. Divide-a em partes mais pequenas.")
             continue
 
-        result = run(AgentService.reply(history[-MAX_HISTORY_MESSAGES:], context))
+        compacted = run(ConversationSummaryService.compact(history, conversation_summary))
+        if compacted["success"]:
+            history = compacted["data"].messages
+            conversation_summary = compacted["data"].summary
+
+        result = run(
+            AgentService.reply(history[-MAX_HISTORY_MESSAGES:], context, conversation_summary=conversation_summary)
+        )
         if not result["success"]:
             history.pop()
             write(_error_text(result))
@@ -112,11 +122,18 @@ def run_chat(
 
 
 def _show_memories(write: Callable[[str], None], run: Runner) -> None:
+    summary = run(MemoryService.get_summary())["data"]
     memories = run(MemoryService.list_memories())["data"]
-    if not memories:
+    if not summary and not memories:
         write("Ainda não guardei nada sobre ti.")
         return
     write("O que sei sobre ti:")
+    if summary:
+        write("  Resumo das memórias antigas:")
+        for line in summary.splitlines():
+            write(f"    {line}")
+        if memories:
+            write("  Memórias recentes:")
     for memory in memories:
         write(f"  {memory.id:>3}) {memory.content}")
 

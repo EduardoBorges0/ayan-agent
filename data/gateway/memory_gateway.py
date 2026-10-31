@@ -30,3 +30,21 @@ class MemoryGateway:
         with SQLiteConnect.connect() as connection:
             cursor = connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         return cursor.rowcount > 0
+
+    @staticmethod
+    def get_summary() -> str | None:
+        with SQLiteConnect.connect() as connection:
+            row = connection.execute("SELECT content FROM memory_summary WHERE id = 1").fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def compact(summary: str, up_to_id: int) -> int:
+        # Guarda o resumo e apaga as memórias já resumidas na mesma transação: nunca se perde informação a meio.
+        with SQLiteConnect.connect() as connection:
+            connection.execute(
+                "INSERT INTO memory_summary (id, content) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')",
+                (summary,),
+            )
+            cursor = connection.execute("DELETE FROM memories WHERE id <= ?", (up_to_id,))
+        return cursor.rowcount

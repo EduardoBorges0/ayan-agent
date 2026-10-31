@@ -8,7 +8,6 @@ _MEMORY_ERRORS = {
     "memory_too_long": f"a memória tem mais de {MAX_MEMORY_LENGTH} caracteres",
     "memory_looks_like_secret": "parece conter uma chave ou segredo e não foi guardada",
     "memory_already_exists": "essa memória já existe",
-    "memory_limit_reached": "a memória está cheia; esquece memórias desatualizadas antes de guardar novas",
     "memory_not_found": "não existe nenhuma memória com esse número",
 }
 

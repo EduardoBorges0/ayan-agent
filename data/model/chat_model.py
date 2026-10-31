@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -16,3 +17,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+@dataclass(frozen=True)
+class CompactedConversation:
+    summary: str | None
+    messages: list[ChatMessage]
